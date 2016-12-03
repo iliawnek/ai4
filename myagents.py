@@ -56,7 +56,8 @@ class SolutionReport(object):
           self.mission_xml_as_expected = 'Unknown'
 
     def checkGoal(self):
-          """ This function checks if the goal has been reached based on the expected reward structure (will not work if you change the mission xml!)"""
+          """ This function checks if the goal has been reached based on the expected reward structure
+          (will not work if you change the mission xml!)"""
           #-- It is not included for simplifity --#
           if self.reward_cumulative!=None:
             x = round((abs(self.reward_cumulative)-abs(round(self.reward_cumulative)))*100);
@@ -175,6 +176,12 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
               <ObservationFromFullStats/>
               <ObservationFromRecentCommands/>
               <ObservationFromFullInventory/>
+              <ObservationFromGrid>
+                <Grid name="floor3x3">
+                  <min x="-1" y="-1" z="-1"/>
+                  <max x="1" y="-1" z="1"/>
+                </Grid>
+              </ObservationFromGrid>
               <RewardForCollectingItem>
                 <Item reward="'''+str(reward_diamond)+'''" type="diamond"/>
               </RewardForCollectingItem>
@@ -191,13 +198,23 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
         </Mission>'''
     return xml_str, msize.get(mission_type,100),reward_goal,reward_diamond,n_intermediate_rewards,reward_timeout,reward_sendcommand,mtimeout.get(mission_type_tmp,0)
 
+
 #----------------------------------------------------------------------------------------------------------------#
 # This function initialized the mission based on the input arguments
-def init_mission(agent_host, port=0, agent_type='Unknown',mission_type='Unknown', mission_seed=0, movement_type='Continuous'):
+def init_mission(agent_host, port=0, agent_type='Unknown', mission_type='Unknown', mission_seed=0, movement_type='Continuous'):
     """ Generate, and load the mission and return the agent host """
 
     #-- Set up the mission via XML definition --#
-    mission_xml, msize, reward_goal,reward_intermediate,n_intermediate_rewards,reward_timeout,reward_sendcommand, timeout = GetMissionInstance(mission_type,mission_seed,agent_type)
+    (
+        mission_xml,
+        msize,
+        reward_goal,
+        reward_intermediate,
+        n_intermediate_rewards,
+        reward_timeout,
+        reward_sendcommand,
+        timeout
+    )= GetMissionInstance(mission_type, mission_seed, agent_type)
     my_mission = MalmoPython.MissionSpec(mission_xml, True)
     my_mission.forceWorldReset()
 
@@ -228,15 +245,15 @@ def init_mission(agent_host, port=0, agent_type='Unknown',mission_type='Unknown'
 
     #-- Add support for the specific movement type requested (and given the constraints of the assignment) --#
     #-- See e.g. http://microsoft.github.io/malmo/0.17.0/Schemas/MissionHandlers.html   --#
-    if movement_type.lower()=='absolute':
+    if movement_type.lower() == 'absolute':
         my_mission.allowAllAbsoluteMovementCommands()
-    elif movement_type.lower()=='continuous':
+    elif movement_type.lower() == 'continuous':
         my_mission.allowContinuousMovementCommand('move')
         my_mission.allowContinuousMovementCommand('strafe')
         my_mission.allowContinuousMovementCommand('pitch')
         my_mission.allowContinuousMovementCommand('turn')
         my_mission.allowContinuousMovementCommand('crouch')
-    elif movement_type.lower()=='discrete':
+    elif movement_type.lower() == 'discrete':
         my_mission.allowDiscreteMovementCommand('turn')
         my_mission.allowDiscreteMovementCommand('move')
         my_mission.allowDiscreteMovementCommand('movenorth')
@@ -285,9 +302,9 @@ def init_mission(agent_host, port=0, agent_type='Unknown',mission_type='Unknown'
 #-- This class implements the Realistic Agent --#
 class AgentRealistic:
 
-    def __init__(self,agent_host,agent_port, mission_type, mission_seed, solution_report, state_space_graph):
+    def __init__(self, agent_host, agent_port, mission_type, mission_seed, solution_report, state_space_graph):
         """ Constructor for the realistic agent """
-        self.AGENT_MOVEMENT_TYPE = 'Absolute' # HINT: You can change this if you want {Absolute, Discrete, Continuous}
+        self.AGENT_MOVEMENT_TYPE = 'Discrete'
         self.AGENT_NAME = 'Realistic'
 
         self.agent_host = agent_host
@@ -299,17 +316,141 @@ class AgentRealistic:
         self.solution_report.setMissionType(self.mission_type)
         self.solution_report.setMissionSeed(self.mission_seed)
 
+    class Node:
+        def __init__(self, type, x, z):
+            self.visits = 0
+            self.type = type
+            self.x = x
+            self.z = z
+
+        def visit(self):
+            self.visits += 1
+
+    @staticmethod
+    def update_graph(graph, grid, current_node):
+        # definitions
+        outer_wall = u'stone'
+        inner_wall = u'stained_hardened_clay'
+        path = u'glowstone'
+        start = u'emerald_block'
+        end = u'redstone_block'
+        walkable = [path, start, end]
+
+        x = current_node.x
+        z = current_node.z
+        if grid[1] in walkable:
+            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x, z - 1))
+        if grid[3] in walkable:
+            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x - 1, z))
+        if grid[5] in walkable:
+            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x + 1, z))
+        if grid[7] in walkable:
+            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x, z + 1))
+
+    # Get node if it already exists, else create new node
+    @staticmethod
+    def get_node(graph, type, x, z):
+        for node in graph.nodes():
+            if node.x == x and node.z == z:
+                return node
+        return AgentRealistic.Node(type, x, z)
+
     def run_agent(self):
         """ Run the Realistic agent and log the performance and resource use """
 
         #-- Load and init mission --#
-        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + ' allowing ' +  self.AGENT_MOVEMENT_TYPE + ' movements')
-        mission_xml = init_mission(self.agent_host, self.agent_port, self.AGENT_NAME, self.mission_type, self.mission_seed, self.AGENT_MOVEMENT_TYPE)
+        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + '.')
+        print('The mission only allows ' + self.AGENT_MOVEMENT_TYPE + ' movements.')
+        mission_xml = init_mission(
+            self.agent_host,
+            self.agent_port,
+            self.AGENT_NAME,
+            self.mission_type,
+            self.mission_seed,
+            self.AGENT_MOVEMENT_TYPE
+        )
         self.solution_report.setMissionXML(mission_xml)
         time.sleep(1)
         self.solution_report.start()
 
         # INSERT: YOUR SOLUTION HERE (REWARDS MUST BE UPDATED IN THE solution_report)
+
+        # read initial local environment
+        state_t = self.agent_host.getWorldState()
+        msg = state_t.observations[-1].text
+        oracle = json.loads(msg)
+        grid = oracle.get(u'grid', 0)
+
+        # initialise graph
+        current_node = self.Node(grid[4], 0, 0)
+        maze_map = UndirectedGraph({current_node: {}})
+        self.update_graph(maze_map, grid, current_node)
+
+        # Main loop:
+        while state_t.is_mission_running:
+            # choose random action
+            possible = maze_map.get(current_node).keys()
+            unvisited = [node for node in possible if node.visits == 0]
+            if possible:
+                if unvisited:
+                    next_node = random.choice(unvisited)
+                else:
+                    next_node = random.choice(possible)
+                try:
+                    # print("Action_t: Goto state ")  # todo: print id of new state
+                    if next_node.x is current_node.x - 1:
+                        agent_host.sendCommand("movewest 1")
+                    elif next_node.x is current_node.x + 1:
+                        agent_host.sendCommand("moveeast 1")
+                    elif next_node.z is current_node.z - 1:
+                        agent_host.sendCommand("movenorth 1")
+                    elif next_node.z is current_node.z + 1:
+                        agent_host.sendCommand("movesouth 1")
+                    next_node.visit()
+                    current_node = next_node
+                    self.solution_report.addAction()
+                except RuntimeError as e:
+                    print "Failed to send command:", e
+                    pass
+
+            # Wait a sec
+            time.sleep(0.5)  # todo: change back to 0.5s
+
+            # Get the world state
+            state_t = agent_host.getWorldState()
+
+            # Collect the number of rewards and add to reward_cumulative
+            # Note: Since we only observe the sensors and environment every
+            #  a number of rewards may have accumulated in the buffer
+            for reward_t in state_t.rewards:
+                # print "Rewards:", reward_t.getValue()
+                self.solution_report.addReward(reward_t.getValue(), datetime.datetime.now())
+
+            # Check if anything went wrong along the way
+            for error in state_t.errors:
+                print "Error:", error.text
+
+            # Handle the percepts
+            xpos = None
+            zpos = None
+            # Have any Oracle-like and/or internal sensor observations come in?
+            if state_t.number_of_observations_since_last_state > 0:
+                msg = state_t.observations[-1].text  # Get the detailed for the last observed state
+                oracle = json.loads(msg)  # Parse the Oracle JSON
+
+                # Oracle
+                grid = oracle.get(u'grid', 0)
+                self.update_graph(maze_map, grid, current_node)
+
+                # GPS-like sensor
+                xpos = oracle.get(u'XPos', 0)  # Position in 2D plane, 1st axis
+                zpos = oracle.get(u'ZPos', 0)  # Position in 2D plane, 2nd axis (yes Z!)
+
+            # Print some of the state information
+            # print "Observations:", state_t.number_of_observations_since_last_state
+            # print "Rewards received:", state_t.number_of_rewards_since_last_state
+            # print "(x, z):", xpos, zpos
+            # print
 
         return
 
@@ -319,7 +460,7 @@ class AgentSimple:
 
     def __init__(self, agent_host, agent_port, mission_type, mission_seed, solution_report, state_space):
         """ Constructor for the simple agent """
-        self.AGENT_MOVEMENT_TYPE = 'Absolute' # HINT: You can change this if you want {Absolute, Discrete, Continuous}
+        self.AGENT_MOVEMENT_TYPE = 'Absolute'
         self.AGENT_NAME = 'Simple'
 
         self.agent_host = agent_host
@@ -327,7 +468,7 @@ class AgentSimple:
         self.mission_seed = mission_seed
         self.mission_type = mission_type
         self.state_space = state_space;
-        self.solution_report = solution_report;  # Python calls by reference !
+        self.solution_report = solution_report;  # Python calls by reference!
         self.solution_report.setMissionType(self.mission_type)
         self.solution_report.setMissionSeed(self.mission_seed)
 
@@ -395,11 +536,17 @@ class AgentSimple:
     def run_agent(self):
         """ Run the Simple agent and log the performance and resource use """
 
-        # -- Load and init mission --#
-        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(
-            self.mission_seed) + ' allowing ' + self.AGENT_MOVEMENT_TYPE + ' movements')
-        mission_xml = init_mission(self.agent_host, self.agent_port, self.AGENT_NAME, self.mission_type,
-                                   self.mission_seed, self.AGENT_MOVEMENT_TYPE)
+        #-- Load and init mission --#
+        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + '.')
+        print('The mission only allows ' +  self.AGENT_MOVEMENT_TYPE + ' movements.')
+        mission_xml = init_mission(
+            self.agent_host,
+            self.agent_port,
+            self.AGENT_NAME,
+            self.mission_type,
+            self.mission_seed,
+            self.AGENT_MOVEMENT_TYPE
+        )
         self.solution_report.setMissionXML(mission_xml)
         time.sleep(1)
         self.solution_report.start()
@@ -423,6 +570,7 @@ class AgentSimple:
 
         # Main loop:
         state_t = self.agent_host.getWorldState()
+        once = True
         while state_t.is_mission_running:
 
             # This is a teleportation agent
@@ -447,7 +595,7 @@ class AgentSimple:
                 pass
 
             # Wait a sec
-            time.sleep(0.1) # todo: change back to 0.5s
+            time.sleep(0.1)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -466,7 +614,8 @@ class AgentSimple:
             # Handle the percepts
             xpos = None
             zpos = None
-            if state_t.number_of_observations_since_last_state > 0:  # Has any Oracle-like and/or internal sensor observations come in?
+            # Have any Oracle-like and/or internal sensor observations come in?
+            if state_t.number_of_observations_since_last_state > 0:
                 msg = state_t.observations[-1].text  # Get the detailed for the last observed state
                 oracle = json.loads(msg)  # Parse the Oracle JSON
 
@@ -513,17 +662,18 @@ class AgentRandom:
         """ Run the Random agent and log the performance and resource use """
 
         #-- Load and init mission --#
-        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + ' allowing ' +  self.AGENT_MOVEMENT_TYPE + ' movements')
-        mission_xml,reward_goal,reward_intermediate,n_intermediate_rewards,reward_timeout,reward_sendcommand, timeout = init_mission(self.agent_host, self.agent_port, self.AGENT_NAME, self.mission_type, self.mission_seed, self.AGENT_MOVEMENT_TYPE)
+        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + '.')
+        print('The mission only allows ' +  self.AGENT_MOVEMENT_TYPE + ' movements.')
+        mission_xml = init_mission(
+            self.agent_host,
+            self.agent_port,
+            self.AGENT_NAME,
+            self.mission_type,
+            self.mission_seed,
+            self.AGENT_MOVEMENT_TYPE
+        )
         self.solution_report.setMissionXML(mission_xml)
-
-        #-- Define local capabilities of the agent (sensors)--#
-        self.agent_host.setObservationsPolicy(MalmoPython.ObservationsPolicy.LATEST_OBSERVATION_ONLY)
-        self.agent_host.setVideoPolicy(MalmoPython.VideoPolicy.LATEST_FRAME_ONLY)
-        self.agent_host.setRewardsPolicy(MalmoPython.RewardsPolicy.KEEP_ALL_REWARDS)
-
-        time.sleep(0.5)
-
+        time.sleep(1)
         self.solution_report.start()
 
         #-- Get the state of the world along with internal state...  --#
@@ -537,14 +687,16 @@ class AgentRandom:
 
             #-- This is a random agent --#
             try:
-                #-- Random hardwired moves --#
-                self.agent_host.sendCommand("pitch " + str(0)) # 0: look straigh ahead
+                # look straight ahead
+                self.agent_host.sendCommand("pitch " + str(0))
                 self.solution_report.addAction()
 
-                self.agent_host.sendCommand("move "  + str(1)) # 1: means: move forward as fast as possible (in direction of sight)
+                # move forward at full speed
+                self.agent_host.sendCommand("move " + str(1))
                 self.solution_report.addAction()
 
-                self.agent_host.sendCommand("turn "  + str(agent_confusement_level*(random.random()*2-1)) ) # start turning in a random direction, rather slowly
+                # start turning in a random direction, rather slowly
+                self.agent_host.sendCommand("turn " + str(agent_confusement_level * (random.random() * 2 - 1)))
                 self.solution_report.addAction()
             except RuntimeError as e:
                 print("Failed to send command:",e)
@@ -559,17 +711,16 @@ class AgentRandom:
             #-- Stop movement --#
             if state_t.is_mission_running:
                 #-- Enforce a simple discrete behavior by stopping any continuous movement in progress --#
-                self.agent_host.sendCommand("move "  + str(0))
+                self.agent_host.sendCommand("move " + str(0))
                 self.solution_report.addAction()
 
                 self.agent_host.sendCommand("pitch " + str(0))
                 self.solution_report.addAction()
 
-                self.agent_host.sendCommand("turn "  + str(0))
+                self.agent_host.sendCommand("turn " + str(0))
                 self.solution_report.addAction()
 
             #-- Collect the number of rewards and add to reward_cumulative  --#
-            #-- Note: Since we only observe the sensors and environment every a number of rewards may have accumulated in the buffer  --#
             for reward_t in state_t.rewards:
                 print("Reward_t:",reward_t.getValue())
                 self.solution_report.addReward(reward_t.getValue(), datetime.datetime.now())
@@ -587,17 +738,17 @@ class AgentRandom:
             grid  = None
 
             #-- Oracle and Internal Sensors--#
-            if state_t.number_of_observations_since_last_state > 0: # Has any Oracle-like and/or internal sensor observations come in?
-                msg = state_t.observations[-1].text                 # Get the details for the last observed state
-                oracle_and_internal = json.loads(msg)               # Parse the Oracle JSON
+            if state_t.number_of_observations_since_last_state > 0:
+                msg = state_t.observations[-1].text
+                oracle_and_internal = json.loads(msg)
 
                 #-- Oracle sensor --#
-                grid = oracle_and_internal.get(u'grid', 0)          # Demo only, string with the
+                grid = oracle_and_internal.get(u'grid', 0)
 
                 #-- GPS-like sensor  --#
-                xpos = oracle_and_internal.get(u'XPos', 0)          # Demo only, position in 2D plane, 1st axis
-                zpos = oracle_and_internal.get(u'ZPos', 0)          # Demo only, position in 2D plane, 2nd axis (yes Z!)
-                ypos = oracle_and_internal.get(u'YPos', 0)          # Demo only, height as measured from surface! (yes Y!)
+                xpos = oracle_and_internal.get(u'XPos', 0)
+                zpos = oracle_and_internal.get(u'ZPos', 0)
+                ypos = oracle_and_internal.get(u'YPos', 0)
 
                 #-- Standard "internal" sensory inputs --#
                 yaw  = oracle_and_internal.get(u'Yaw', 0)
@@ -617,9 +768,14 @@ class AgentRandom:
                 # Depth: Your can get a pre-computed depth image the state_t.video_frames[0].pixels
 
             #-- Print some of the state information --#
-            print("video,observations,rewards received:",state_t.number_of_video_frames_since_last_state,state_t.number_of_observations_since_last_state,state_t.number_of_rewards_since_last_state)
-            print("\t x,y,z,yaw,pitch:",xpos,ypos,zpos,yaw,pitch)
-            #print('\tRadius X surroundings: ' + str(grid))
+
+            # Print some of the state information
+            print "Observations:", state_t.number_of_observations_since_last_state
+            print "Rewards received:", state_t.number_of_rewards_since_last_state
+            print "(x, z):", xpos, zpos
+            print "Yaw:", yaw
+            print "Pitch:", pitch
+            print
 
         print("Mission has ended ... either because time has passed (negative reward) or goal reached (positive reward)")
         return
@@ -627,7 +783,8 @@ class AgentRandom:
 #--------------------------------------------------------------------------------------
 #-- This class implements a helper Agent for deriving the state-space representation ---#
 class AgentHelper:
-    """ This agent determines the state space for use by the actual problem solving agent. Enabeling do_plot will allow you to visualize the results """
+    """ This agent determines the state space for use by the actual problem solving agent.
+    Enabling do_plot will allow you to visualize the results """
 
     def __init__(self, agent_host, agent_port, mission_type, mission_seed, solution_report, state_space_graph):
         """ Constructor for the helper agent """
@@ -648,7 +805,8 @@ class AgentHelper:
         do_plot = False
 
         #-- Load and init the Helper mission --#
-        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + ' allowing ' +  self.AGENT_MOVEMENT_TYPE + ' movements')
+        print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + '.')
+        print('The mission only allows ' +  self.AGENT_MOVEMENT_TYPE + ' movements.')
         (
             mission_xml,
             reward_goal,
@@ -679,7 +837,8 @@ class AgentHelper:
 
         #-- Get a state-space model by observing the Orcale/GridObserver--#
         if state_t.is_mission_running:
-            #-- Make sure we look in the right direction when observing the surrounding (otherwise the coordinate system will rotated by the Yaw !) --#
+            #-- Make sure we look in the right direction when observing the surrounding
+            # (otherwise the coordinate system will rotated by the Yaw !) --#
             # Look East (towards +x (east) and +z (south) on the right, i.e. a std x,y coordinate system) yaw=-90
             self.agent_host.sendCommand("setPitch 20")
             time.sleep(1)
@@ -817,15 +976,15 @@ class AgentHelper:
 if __name__ == "__main__":
 
     #-- Define default arguments, in case you run the module as a script --#
-    DEFAULT_STUDENT_GUID = 'template'
-    DEFAULT_AGENT_NAME   = 'Simple' #HINT: Currently choose between {Random, Simple, Realistic}
-    DEFAULT_MALMO_PATH   = '/Users/Ken/Malmo'   # HINT: Change this to your own path, forward slash only!
-    DEFAULT_AIMA_PATH    = '/Users/Ken/aima-python'   # HINT: Change this to your own path, forward slash only, should be the 2.7 version from https://www.dropbox.com/s/vulnv2pkbv8q92u/aima-python_python_v27_r001.zip?dl=0)
-    DEFAULT_MISSION_TYPE = 'medium' #HINT: Choose between {small,medium,large}
-    DEFAULT_MISSION_SEED_MAX = 1 # how many different instances of the given mission (i.e. maze layout)
-    DEFAULT_REPEATS      = 1
-    DEFAULT_PORT         = 0
-    DEFAULT_SAVE_PATH    = './results/'
+    DEFAULT_STUDENT_GUID = '2131620'
+    DEFAULT_AGENT_NAME = 'Realistic'  # HINT: Currently choose between {Random, Simple, Realistic}
+    DEFAULT_MALMO_PATH = '/Users/Ken/Malmo'  # HINT: Change this to your own path, forward slash only!
+    DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
+    DEFAULT_MISSION_TYPE = 'medium'  # HINT: Choose between {small,medium,large}
+    DEFAULT_MISSION_SEED_MAX = 1  # how many different instances of the given mission (i.e. maze layout)
+    DEFAULT_REPEATS = 1
+    DEFAULT_PORT = 0
+    DEFAULT_SAVE_PATH = './results/'
 
     #-- Import required modules --#
     import os
@@ -853,15 +1012,24 @@ if __name__ == "__main__":
 
     #-- Define the commandline arguments required to run the agents from comman line --#
     parser = argparse.ArgumentParser()
-    parser.add_argument("-a" , "--agentname"        , type=str, help="path for the malmo pyhton examples"   , default=DEFAULT_AGENT_NAME)
-    parser.add_argument("-t" , "--missiontype"      , type=str, help="mission type (small,medium,large)"    , default=DEFAULT_MISSION_TYPE)
-    parser.add_argument("-s" , "--missionseedmax"   , type=int, help="maximum mission seed value (integer)"           , default=DEFAULT_MISSION_SEED_MAX)
-    parser.add_argument("-n" , "--nrepeats"         , type=int, help="repeat of a specific agent (if stochastic behavior)"  , default=DEFAULT_REPEATS)
-    parser.add_argument("-g" , "--studentguid"      , type=str, help="student guid"                         , default=DEFAULT_STUDENT_GUID)
-    parser.add_argument("-p" , "--malmopath"        , type=str, help="path for the malmo pyhton examples"   , default=DEFAULT_MALMO_PATH)
-    parser.add_argument("-x" , "--malmoport"        , type=int, help="special port for the Minecraft client", default=DEFAULT_PORT)
-    parser.add_argument("-o" , "--aimapath"         , type=str, help="path for the aima toolbox (optional)"   , default=DEFAULT_AIMA_PATH)
-    parser.add_argument("-r" , "--resultpath"       , type=str, help="the path where the results are saved" , default=DEFAULT_SAVE_PATH)
+    parser.add_argument("-a", "--agentname", type=str, help="path for the malmo pyhton examples",
+                        default=DEFAULT_AGENT_NAME)
+    parser.add_argument("-t", "--missiontype", type=str, help="mission type (small,medium,large)",
+                        default=DEFAULT_MISSION_TYPE)
+    parser.add_argument("-s", "--missionseedmax", type=int, help="maximum mission seed value (integer)",
+                        default=DEFAULT_MISSION_SEED_MAX)
+    parser.add_argument("-n", "--nrepeats", type=int, help="repeat of a specific agent (if stochastic behavior)",
+                        default=DEFAULT_REPEATS)
+    parser.add_argument("-g", "--studentguid", type=str, help="student guid",
+                        default=DEFAULT_STUDENT_GUID)
+    parser.add_argument("-p", "--malmopath", type=str, help="path to the Malmo Python examples",
+                        default=DEFAULT_MALMO_PATH)
+    parser.add_argument("-x", "--malmoport", type=int, help="special port for the Minecraft client",
+                        default=DEFAULT_PORT)
+    parser.add_argument("-o", "--aimapath", type=str, help="path for the aima toolbox (optional)",
+                        default=DEFAULT_AIMA_PATH)
+    parser.add_argument("-r", "--resultpath", type=str, help="the path where the results are saved",
+                        default=DEFAULT_SAVE_PATH)
     args = parser.parse_args()
     print args
 
@@ -879,7 +1047,9 @@ if __name__ == "__main__":
     from search import *
 
     #-- Create the command line string for convenience --#
-    cmd = 'python myagents.py -a ' + args.agentname + ' -s ' + str(args.missionseedmax) + ' -n ' + str(args.nrepeats) + ' -t ' + args.missiontype + ' -g ' + args.studentguid + ' -p ' + args.malmopath + ' -x ' + str(args.malmoport)
+    cmd = 'python myagents.py -a ' + args.agentname + ' -s ' + str(args.missionseedmax) + ' -n ' + str(
+        args.nrepeats) + ' -t ' + args.missiontype + ' -g ' + args.studentguid + ' -p ' + args.malmopath + ' -x ' + str(
+        args.malmoport)
     print(cmd)
 
     #-- Run the agent a number of times (it only makes a difference if you agent has some random elemnt to it, initalizaiton, behavior etc) --#
@@ -899,10 +1069,12 @@ if __name__ == "__main__":
             solution_report = SolutionReport()
             solution_report.setStudentGuid(args.studentguid)
 
-            print('Get an instance of the specific ' + args.agentname + ' agent with the agent_host and load the ' + args.missiontype + ' mission with seed ' + str(i_training_seed))
+            print('Get an instance of the specific ' + args.agentname + ' agent with the agent_host')
+            print('load the ' + args.missiontype + ' mission with seed ' + str(i_training_seed))
             agent_name = 'Agent' + args.agentname
             state_space = deepcopy(helper_agent.state_space)
-            agent_to_be_evaluated = eval(agent_name+'(agent_host,args.malmoport,args.missiontype,i_training_seed,solution_report,state_space)')
+            agent_to_be_evaluated = eval(
+                agent_name + '(agent_host,args.malmoport,args.missiontype,i_training_seed,solution_report,state_space)')
 
             print('Run the agent, time it and log the performance...')
             solution_report.start() # start the timer (may be overwritten in the agent to provide a fair comparison)
@@ -912,16 +1084,19 @@ if __name__ == "__main__":
             print("\n---------------------------------------------")
             print("| Solution Report Summary: ")
             print("|\tCumulative reward = " + str(solution_report.reward_cumulative))
-            print("|\tDuration (wallclock) = " + str((solution_report.end_datetime_wallclock-solution_report.start_datetime_wallclock).total_seconds()))
+            print("|\tDuration (wallclock) = " + str(
+                (solution_report.end_datetime_wallclock - solution_report.start_datetime_wallclock).total_seconds()))
             print("|\tNumber of reported actions = " + str(solution_report.action_count))
             print("|\tFinal goal reached = " + str(solution_report.is_goal))
             print("|\tTimeout = " + str(solution_report.is_timeout))
             print("---------------------------------------------\n")
 
             print('Save the solution report to a specific file for later analysis and reporting...')
-            fn_result = args.resultpath + 'solution_' + args.studentguid + '_' + agent_name + '_' +args.missiontype + '_' + str(i_training_seed) + '_' + str(i_rep)
+            fn_result = args.resultpath + 'solution_' + args.studentguid + '_' + agent_name + '_' + args.missiontype + '_' + str(
+                i_training_seed) + '_' + str(i_rep)
             foutput = open(fn_result+'.pkl', 'wb')
-            pickle.dump(agent_to_be_evaluated.solution_report,foutput) # Save the solution information in a specific file, HiNT:  It can be loaded with pickle.load(output) with read permissions to the file
+            pickle.dump(agent_to_be_evaluated.solution_report,foutput) # Save the solution information in a specific file
+            # HINT:  It can be loaded with pickle.load(output) with read permissions to the file
             foutput.close()
 
             #finput = open(fn_result+'.pkl', 'rb')
