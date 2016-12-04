@@ -335,25 +335,46 @@ class AgentRealistic:
         start = u'emerald_block'
         end = u'redstone_block'
         walkable = [path, start, end]
+        adjacent = [1, 3, 5, 7]
 
-        x = current_node.x
-        z = current_node.z
-        if grid[1] in walkable:
-            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x, z - 1))
-        if grid[3] in walkable:
-            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x - 1, z))
-        if grid[5] in walkable:
-            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x + 1, z))
-        if grid[7] in walkable:
-            graph.connect(current_node, AgentRealistic.get_node(graph, grid[1], x, z + 1))
+        for i in adjacent:
+            type = grid[i]
+            if type in walkable:
+                if i == 1:
+                    x = current_node.x
+                    z = current_node.z - 1
+                elif i == 3:
+                    x = current_node.x - 1
+                    z = current_node.z
+                elif i == 5:
+                    x = current_node.x + 1
+                    z = current_node.z
+                elif i == 7:
+                    x = current_node.x
+                    z = current_node.z + 1
 
-    # Get node if it already exists, else create new node
+                existing_node = AgentRealistic.get_node(graph, type, x, z)
+                if existing_node:
+                    connecting_node = existing_node
+                else:
+                    connecting_node = AgentRealistic.Node(type, x, z)
+
+                if AgentRealistic.get_node(graph, type, x - 1, z):
+                    graph.connect(connecting_node, AgentRealistic.get_node(graph, type, x - 1, z))
+                if AgentRealistic.get_node(graph, type, x + 1, z):
+                    graph.connect(connecting_node, AgentRealistic.get_node(graph, type, x + 1, z))
+                if AgentRealistic.get_node(graph, type, x, z - 1):
+                    graph.connect(connecting_node, AgentRealistic.get_node(graph, type, x, z - 1))
+                if AgentRealistic.get_node(graph, type, x, z + 1):
+                    graph.connect(connecting_node, AgentRealistic.get_node(graph, type, x, z + 1))
+
+    # Get node if it already exists, else return None
     @staticmethod
     def get_node(graph, type, x, z):
         for node in graph.nodes():
             if node.x == x and node.z == z:
                 return node
-        return AgentRealistic.Node(type, x, z)
+        return None
 
     def run_agent(self):
         """ Run the Realistic agent and log the performance and resource use """
@@ -418,7 +439,7 @@ class AgentRealistic:
                     pass
 
             # Wait a sec
-            time.sleep(0.1)  # todo: change back to 0.5s
+            time.sleep(0.5)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -457,19 +478,16 @@ class AgentRealistic:
             # print
 
         # connect nodes in graph
-        print
         for node in maze_map.nodes():
-            print node.x, node.z
             connections = maze_map.get(node)
-            # for connection in connections.keys():
-                # graph.add_edge(node, connection)  # add edges to the graph
-                # print connection
+            for connection in connections.keys():
+                graph.add_edge(node, connection)  # add edges to the graph
 
         # generate graph visualisation
         positions = {node: (-node.x, node.z) for node in maze_map.nodes()}
         plt.figure(figsize=(18, 13))
         nx.draw(graph, pos=positions)
-        nx.draw_networkx_edge_labels(graph, pos=positions)
+        # nx.draw_networkx_edge_labels(graph, pos=positions)
         plt.show()
 
         return
@@ -1001,7 +1019,7 @@ if __name__ == "__main__":
     DEFAULT_MALMO_PATH = '/Users/Ken/Malmo'  # HINT: Change this to your own path, forward slash only!
     DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
     DEFAULT_MISSION_TYPE = 'medium'  # HINT: Choose between {small,medium,large}
-    DEFAULT_MISSION_SEED_MAX = 1  # how many different instances of the given mission (i.e. maze layout)
+    DEFAULT_MISSION_SEED_MAX = 10  # how many different instances of the given mission (i.e. maze layout)
     DEFAULT_REPEATS = 1
     DEFAULT_PORT = 0
     DEFAULT_SAVE_PATH = './results/'
