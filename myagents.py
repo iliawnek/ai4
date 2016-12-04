@@ -386,6 +386,10 @@ class AgentRealistic:
         maze_map = UndirectedGraph({current_node: {}})
         self.update_graph(maze_map, grid, current_node)
 
+        # start building visualisation
+        graph = nx.Graph()
+        graph.add_node(current_node)
+
         # Main loop:
         while state_t.is_mission_running:
             # choose random action
@@ -397,16 +401,16 @@ class AgentRealistic:
                 else:
                     next_node = random.choice(possible)
                 try:
-                    # print("Action_t: Goto state ")  # todo: print id of new state
-                    if next_node.x is current_node.x - 1:
+                    if next_node.x == (current_node.x - 1):
                         agent_host.sendCommand("movewest 1")
-                    elif next_node.x is current_node.x + 1:
+                    elif next_node.x == (current_node.x + 1):
                         agent_host.sendCommand("moveeast 1")
-                    elif next_node.z is current_node.z - 1:
+                    elif next_node.z == (current_node.z - 1):
                         agent_host.sendCommand("movenorth 1")
-                    elif next_node.z is current_node.z + 1:
+                    elif next_node.z == (current_node.z + 1):
                         agent_host.sendCommand("movesouth 1")
                     next_node.visit()
+                    graph.add_node(next_node)
                     current_node = next_node
                     self.solution_report.addAction()
                 except RuntimeError as e:
@@ -414,7 +418,7 @@ class AgentRealistic:
                     pass
 
             # Wait a sec
-            time.sleep(0.5)  # todo: change back to 0.5s
+            time.sleep(0.1)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -451,6 +455,22 @@ class AgentRealistic:
             # print "Rewards received:", state_t.number_of_rewards_since_last_state
             # print "(x, z):", xpos, zpos
             # print
+
+        # connect nodes in graph
+        print
+        for node in maze_map.nodes():
+            print node.x, node.z
+            connections = maze_map.get(node)
+            # for connection in connections.keys():
+                # graph.add_edge(node, connection)  # add edges to the graph
+                # print connection
+
+        # generate graph visualisation
+        positions = {node: (-node.x, node.z) for node in maze_map.nodes()}
+        plt.figure(figsize=(18, 13))
+        nx.draw(graph, pos=positions)
+        nx.draw_networkx_edge_labels(graph, pos=positions)
+        plt.show()
 
         return
 
@@ -1002,7 +1022,7 @@ if __name__ == "__main__":
     import hashlib
     import matplotlib.pyplot as plt
     import matplotlib.image as mpimg
-    # import networkx as nx
+    import networkx as nx
     from matplotlib import lines
 
     # from Tkinter import * # only for showing the video input
