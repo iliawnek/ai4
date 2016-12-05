@@ -439,17 +439,23 @@ class AgentRealistic:
             unvisited = [node for node in possible if node.visits == 0]
             if possible:
                 if unvisited:
-                    next_node = random.choice(unvisited)
+                    for unvisited_node in unvisited:
+                        if self.direction(current_node, unvisited_node) == "forward":
+                            next_node = unvisited_node
+                            break
+                    else:
+                        next_node = random.choice(unvisited)
                 else:
                     next_node = random.choice(possible)
                 try:
-                    if next_node.x == (current_node.x - 1):
+                    direction = self.direction(current_node, next_node)
+                    if direction == "right":
                         agent_host.sendCommand("movewest 1")
-                    elif next_node.x == (current_node.x + 1):
+                    elif direction == "left":
                         agent_host.sendCommand("moveeast 1")
-                    elif next_node.z == (current_node.z - 1):
+                    elif direction == "back":
                         agent_host.sendCommand("movenorth 1")
-                    elif next_node.z == (current_node.z + 1):
+                    elif direction == "forward":
                         agent_host.sendCommand("movesouth 1")
                     next_node.visit()
                     graph.add_node(next_node)
