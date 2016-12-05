@@ -112,8 +112,8 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
     }
     mtimeout = {
         'helper': 120000,
-        'small': 60000,
-        # 'small': 1000,
+        # 'small': 60000,  # todo: change back to 60s
+        'small': 24000,
         'medium': 120000,
         'large': 240000,
     }
@@ -348,6 +348,8 @@ class AgentRealistic:
 
         for i in adjacent:
             type = grid[i]
+            if i == 7 and type == outer_wall:
+                print "found the wall!"
             if type in walkable:
                 if i == 1:
                     x = current_node.x
@@ -427,6 +429,7 @@ class AgentRealistic:
         current_node = self.Node(grid[4], 0, 0)
         maze_map = UndirectedGraph({current_node: {}})
         self.update_graph(maze_map, grid, current_node)
+        node_history = []
 
         # initialise visualisation
         graph = nx.Graph()
@@ -438,6 +441,7 @@ class AgentRealistic:
             possible = maze_map.get(current_node).keys()
             unvisited = [node for node in possible if node.visits == 0]
             if possible:
+                reversing = False
                 if unvisited:
                     for unvisited_node in unvisited:
                         if self.direction(current_node, unvisited_node) == "forward":
@@ -446,7 +450,8 @@ class AgentRealistic:
                     else:
                         next_node = random.choice(unvisited)
                 else:
-                    next_node = random.choice(possible)
+                    next_node = node_history.pop()
+                    reversing = True
                 try:
                     direction = self.direction(current_node, next_node)
                     if direction == "right":
@@ -459,6 +464,8 @@ class AgentRealistic:
                         agent_host.sendCommand("movesouth 1")
                     next_node.visit()
                     graph.add_node(next_node)
+                    if not reversing:
+                        node_history.append(current_node)
                     current_node = next_node
                     self.solution_report.addAction()
                 except RuntimeError as e:
@@ -1052,7 +1059,8 @@ if __name__ == "__main__":
     DEFAULT_MALMO_PATH = '/Users/Ken/Malmo'  # HINT: Change this to your own path, forward slash only!
     DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
     DEFAULT_MISSION_TYPE = 'small'  # HINT: Choose between {small,medium,large}
-    DEFAULT_MISSION_SEED_MAX = 1  # how many different instances of the given mission (i.e. maze layout)
+    DEFAULT_START_SEED = 2
+    DEFAULT_MISSION_SEED_MAX = 3  # how many different instances of the given mission (i.e. maze layout)
     DEFAULT_REPEATS = 1
     DEFAULT_PORT = 0
     DEFAULT_SAVE_PATH = './results/'
@@ -1129,7 +1137,7 @@ if __name__ == "__main__":
     print('Instantiate an agent interface/api to Malmo')
     agent_host = MalmoPython.AgentHost()
 
-    for i_training_seed in range(0,args.missionseedmax):
+    for i_training_seed in range(2, args.missionseedmax):  # todo: change start of range back to 0
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
         helper_solution_report = SolutionReport()
         helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
