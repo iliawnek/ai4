@@ -112,7 +112,8 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
     }
     mtimeout = {
         'helper': 120000,
-        'small': 60000,
+        # 'small': 60000,
+        'small': 10000,
         'medium': 120000,
         'large': 240000,
     }
@@ -268,7 +269,7 @@ def init_mission(agent_host, port=0, agent_type='Unknown', mission_type='Unknown
     # Set up a recording for later inspection
     my_mission_record = MalmoPython.MissionRecordSpec('tmp' + ".tgz")
     my_mission_record.recordRewards()
-    my_mission_record.recordMP4(24,400000)
+    my_mission_record.recordMP4(24, 400000)
 
     #-- Attempt to start a mission --#
     max_retries = 5
@@ -322,9 +323,17 @@ class AgentRealistic:
             self.type = type
             self.x = x
             self.z = z
+            if type == u'emerald_block':
+                self.color = "green"
+            elif type == u'redstone_block':
+                self.color = "red"
+            else:
+                self.color = "yellow"
 
         def visit(self):
             self.visits += 1
+            if self.color == "yellow":
+                self.color = "white"
 
     @staticmethod
     def update_graph(graph, grid, current_node):
@@ -439,7 +448,7 @@ class AgentRealistic:
                     pass
 
             # Wait a sec
-            time.sleep(0.5)  # todo: change back to 0.5s
+            time.sleep(0.2)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -486,7 +495,9 @@ class AgentRealistic:
         # generate graph visualisation
         positions = {node: (-node.x, node.z) for node in maze_map.nodes()}
         plt.figure(figsize=(18, 13))
-        nx.draw(graph, pos=positions)
+        nx.draw(graph, pos=positions, node_color=[node.color for node in graph.nodes()])
+        node_label_pos = {k: [v[0], v[1] + 0.04] for k, v in positions.items()}
+        nx.draw_networkx_labels(graph, pos=node_label_pos, labels={node: node.visits for node in maze_map.nodes()}, font_size=14)
         # nx.draw_networkx_edge_labels(graph, pos=positions)
         plt.show()
 
@@ -1018,8 +1029,8 @@ if __name__ == "__main__":
     DEFAULT_AGENT_NAME = 'Realistic'  # HINT: Currently choose between {Random, Simple, Realistic}
     DEFAULT_MALMO_PATH = '/Users/Ken/Malmo'  # HINT: Change this to your own path, forward slash only!
     DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
-    DEFAULT_MISSION_TYPE = 'medium'  # HINT: Choose between {small,medium,large}
-    DEFAULT_MISSION_SEED_MAX = 10  # how many different instances of the given mission (i.e. maze layout)
+    DEFAULT_MISSION_TYPE = 'small'  # HINT: Choose between {small,medium,large}
+    DEFAULT_MISSION_SEED_MAX = 1  # how many different instances of the given mission (i.e. maze layout)
     DEFAULT_REPEATS = 1
     DEFAULT_PORT = 0
     DEFAULT_SAVE_PATH = './results/'
