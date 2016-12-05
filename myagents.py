@@ -112,8 +112,8 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
     }
     mtimeout = {
         'helper': 120000,
-        # 'small': 60000,
-        'small': 10000,
+        'small': 60000,
+        # 'small': 1000,
         'medium': 120000,
         'large': 240000,
     }
@@ -385,6 +385,18 @@ class AgentRealistic:
                 return node
         return None
 
+    # Get direction of other_node in relation to current_node
+    @staticmethod
+    def direction(current_node, other_node):
+        if other_node.x == (current_node.x - 1):
+            return "right"
+        elif other_node.x == (current_node.x + 1):
+            return "left"
+        elif other_node.z == (current_node.z - 1):
+            return "back"
+        elif other_node.z == (current_node.z + 1):
+            return "forward"
+
     def run_agent(self):
         """ Run the Realistic agent and log the performance and resource use """
 
@@ -416,7 +428,7 @@ class AgentRealistic:
         maze_map = UndirectedGraph({current_node: {}})
         self.update_graph(maze_map, grid, current_node)
 
-        # start building visualisation
+        # initialise visualisation
         graph = nx.Graph()
         graph.add_node(current_node)
 
@@ -497,7 +509,8 @@ class AgentRealistic:
         plt.figure(figsize=(18, 13))
         nx.draw(graph, pos=positions, node_color=[node.color for node in graph.nodes()])
         node_label_pos = {k: [v[0], v[1] + 0.04] for k, v in positions.items()}
-        nx.draw_networkx_labels(graph, pos=node_label_pos, labels={node: node.visits for node in maze_map.nodes()}, font_size=14)
+        labels = {node: (node.visits if node.visits > 0 else "") for node in maze_map.nodes()}
+        nx.draw_networkx_labels(graph, pos=node_label_pos, labels=labels, font_size=14)
         # nx.draw_networkx_edge_labels(graph, pos=positions)
         plt.show()
 
@@ -505,6 +518,8 @@ class AgentRealistic:
 
 #--------------------------------------------------------------------------------------
 #-- This class implements the Simple Agent --#
+# todo: modify simple agent to use discrete actions instead of absolute actions
+# todo: take intermediate rewards into account when choosing path
 class AgentSimple:
 
     def __init__(self, agent_host, agent_port, mission_type, mission_seed, solution_report, state_space):
@@ -691,6 +706,7 @@ class AgentSimple:
 
 #--------------------------------------------------------------------------------------
 #-- This class implements a basic, suboptimal Random Agent --#
+# todo: modify random agent to perform discrete actions instead of continuous actions
 class AgentRandom:
 
     def __init__(self, agent_host, agent_port, mission_type, mission_seed, solution_report, state_space_graph):
