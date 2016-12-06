@@ -112,8 +112,9 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
     }
     mtimeout = {
         'helper': 120000,
-        # 'small': 60000,  # todo: change back to 60s
-        'small': 24000,
+        'small': 60000,  # todo: change back to 60s
+        # 'small': 25000,
+        # 'small': 180000,
         'medium': 120000,
         'large': 240000,
     }
@@ -323,6 +324,7 @@ class AgentRealistic:
             self.type = type
             self.x = x
             self.z = z
+            self.path_cost = float("inf")
             if type == u'emerald_block':
                 self.color = "green"
             elif type == u'redstone_block':
@@ -399,6 +401,57 @@ class AgentRealistic:
         elif other_node.z == (current_node.z + 1):
             return "forward"
 
+    @staticmethod
+    def distance(current_node, goal_node):
+        return math.sqrt(math.pow(current_node.x - goal_node.x, 2) + math.pow(current_node.z - goal_node.z, 2))
+
+    @staticmethod
+    def best_first_graph_search(graph, current_node, goal_node, f):
+        """Search the nodes with the lowest f scores first.
+        You specify the function f(node) that you want to minimize; for example,
+        if f is a heuristic estimate to the goal, then we have greedy best
+        first search; if f is node.depth then we have breadth-first search.
+        There is a subtlety: the line "f = memoize(f, 'f')" means that the f
+        values will be cached on the nodes as they are computed. So after doing
+        a best first search you can examine the f values of the path returned."""
+
+        # reset all path costs
+        for node in graph.nodes():
+            node.path_cost = float("inf")
+
+        node = current_node
+        path = []
+
+        frontier = PriorityQueue(min, f)
+        frontier.append(node)
+
+        explored = set()
+        while frontier:
+            node = frontier.pop()
+            path.append(node)
+
+            if node.x == goal_node.x and node.z == goal_node.z:
+                return path
+
+            explored.add(node)
+            for child in graph.get(node).keys():
+                if child not in explored and child not in frontier:
+                    frontier.append(child)
+                elif child in frontier:
+                    incumbent = frontier[child]
+                    if f(child) < f(incumbent):
+                        del frontier[incumbent]
+                        frontier.append(child)
+
+
+    @staticmethod
+    def astar_search(graph, current_node, goal_node):
+        """A* search is best-first graph search with f(n) = g(n)+h(n).
+        You need to specify the h function when you call astar_search, or
+        else in your Problem subclass."""
+        h = lambda n: AgentRealistic.distance(n, goal_node)
+        return AgentRealistic.best_first_graph_search(graph, current_node, goal_node, lambda n: n.path_cost + h(n))
+
     def run_agent(self):
         """ Run the Realistic agent and log the performance and resource use """
 
@@ -429,7 +482,6 @@ class AgentRealistic:
         current_node = self.Node(grid[4], 0, 0)
         maze_map = UndirectedGraph({current_node: {}})
         self.update_graph(maze_map, grid, current_node)
-        node_history = []
 
         # initialise visualisation
         graph = nx.Graph()
@@ -437,21 +489,24 @@ class AgentRealistic:
 
         # Main loop:
         while state_t.is_mission_running:
-            # choose random action
+            # choose action
             possible = maze_map.get(current_node).keys()
             unvisited = [node for node in possible if node.visits == 0]
             if possible:
-                reversing = False
                 if unvisited:
+                    # go forward if it's an option
                     for unvisited_node in unvisited:
                         if self.direction(current_node, unvisited_node) == "forward":
                             next_node = unvisited_node
                             break
+                    # choose random action if forward is not an option
                     else:
                         next_node = random.choice(unvisited)
                 else:
-                    next_node = node_history.pop()
-                    reversing = True
+                    all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
+                    furthest_node = max(all_unvisited, key=lambda node: node.z)
+                    print self.astar_search(maze_map, current_node, furthest_node)
+                    break
                 try:
                     direction = self.direction(current_node, next_node)
                     if direction == "right":
@@ -464,8 +519,6 @@ class AgentRealistic:
                         agent_host.sendCommand("movesouth 1")
                     next_node.visit()
                     graph.add_node(next_node)
-                    if not reversing:
-                        node_history.append(current_node)
                     current_node = next_node
                     self.solution_report.addAction()
                 except RuntimeError as e:
@@ -643,7 +696,6 @@ class AgentSimple:
             solution_path.append(cnode)
 
         solution_path_local = deepcopy(solution_path)
-        print solution_path_local
 
         # Main loop:
         state_t = self.agent_host.getWorldState()
@@ -672,7 +724,7 @@ class AgentSimple:
                 pass
 
             # Wait a sec
-            time.sleep(0.1)  # todo: change back to 0.5s
+            time.sleep(0.5)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -1139,9 +1191,9 @@ if __name__ == "__main__":
 
     for i_training_seed in range(2, args.missionseedmax):  # todo: change start of range back to 0
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
-        helper_solution_report = SolutionReport()
-        helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
-        helper_agent.run_agent()
+        # helper_solution_report = SolutionReport()
+        # helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
+        # helper_agent.run_agent()
 
         for i_rep in range(0,args.nrepeats):
             print('Setup the performance log...')
@@ -1151,7 +1203,8 @@ if __name__ == "__main__":
             print('Get an instance of the specific ' + args.agentname + ' agent with the agent_host')
             print('load the ' + args.missiontype + ' mission with seed ' + str(i_training_seed))
             agent_name = 'Agent' + args.agentname
-            state_space = deepcopy(helper_agent.state_space)
+            # state_space = deepcopy(helper_agent.state_space)
+            state_space = None
             agent_to_be_evaluated = eval(
                 agent_name + '(agent_host,args.malmoport,args.missiontype,i_training_seed,solution_report,state_space)')
 
