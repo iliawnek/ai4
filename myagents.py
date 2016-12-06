@@ -113,7 +113,8 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
     mtimeout = {
         'helper': 120000,
         # 'small': 60000,  # todo: change back to 60s
-        'small': 24000,
+        # 'small': 24000,
+        'small': 2400000,
         'medium': 120000,
         'large': 240000,
     }
@@ -399,6 +400,10 @@ class AgentRealistic:
         elif other_node.z == (current_node.z + 1):
             return "forward"
 
+    @staticmethod
+    def distance(current_node, goal_node):
+        return math.sqrt(math.pow(current_node.x - goal_node.x, 2) + math.pow(current_node.z - goal_node.z, 2))
+
     def run_agent(self):
         """ Run the Realistic agent and log the performance and resource use """
 
@@ -426,54 +431,75 @@ class AgentRealistic:
         grid = oracle.get(u'grid', 0)
 
         # initialise graph
-        current_node = self.Node(grid[4], 0, 0)
-        maze_map = UndirectedGraph({current_node: {}})
-        self.update_graph(maze_map, grid, current_node)
-        node_history = []
+        current = self.Node(grid[4], 0, 0)
+        maze_map = UndirectedGraph({current: {}})
+        self.update_graph(maze_map, grid, current)
 
         # initialise visualisation
         graph = nx.Graph()
-        graph.add_node(current_node)
+        graph.add_node(current)
+
+        # simulated annealing values
+        t = 0
+        k = 10
+        lam = 0.06
+
+        iteration = 0
 
         # Main loop:
         while state_t.is_mission_running:
+
+            if iteration % 10 == 0:
+                goal = self.Node(u"", current.x, current.z + 10)
+                # print "New goal:", current.x, current.z + 10
+            iteration += 1
+
             # choose random action
-            possible = maze_map.get(current_node).keys()
-            unvisited = [node for node in possible if node.visits == 0]
-            if possible:
-                reversing = False
-                if unvisited:
-                    for unvisited_node in unvisited:
-                        if self.direction(current_node, unvisited_node) == "forward":
-                            next_node = unvisited_node
-                            break
-                    else:
-                        next_node = random.choice(unvisited)
-                else:
-                    next_node = node_history.pop()
-                    reversing = True
+            while True:
+                t += 1
+                T = k * math.exp(-lam * t)
+                # print T
+
+                if T == 0:
+                    break
+                neighbors = maze_map.get(current).keys()
+                next = random.choice(neighbors)
+                next_distance = AgentRealistic.distance(next, goal)
+                current_distance = AgentRealistic.distance(current, goal)
+                delta_e = next_distance - current_distance
+
                 try:
-                    direction = self.direction(current_node, next_node)
-                    if direction == "right":
-                        agent_host.sendCommand("movewest 1")
-                    elif direction == "left":
-                        agent_host.sendCommand("moveeast 1")
-                    elif direction == "back":
-                        agent_host.sendCommand("movenorth 1")
-                    elif direction == "forward":
-                        agent_host.sendCommand("movesouth 1")
-                    next_node.visit()
-                    graph.add_node(next_node)
-                    if not reversing:
-                        node_history.append(current_node)
-                    current_node = next_node
-                    self.solution_report.addAction()
-                except RuntimeError as e:
-                    print "Failed to send command:", e
-                    pass
+                    exponential = math.exp(delta_e / float(T))
+                except OverflowError:
+                    exponential = float("inf")
+
+                if delta_e < 0 or probability(exponential):
+                    print probability(exponential), exponential
+                    # if delta_e < 0:
+                    #     print "new position is better:", current_distance, next_distance
+                    # if probability(exponential):
+                    #     print "new position is worse, but moving anyway:", current_distance, next_distance
+                    try:
+                        direction = self.direction(current, next)
+                        if direction == "right":
+                            agent_host.sendCommand("movewest 1")
+                        elif direction == "left":
+                            agent_host.sendCommand("moveeast 1")
+                        elif direction == "back":
+                            agent_host.sendCommand("movenorth 1")
+                        elif direction == "forward":
+                            agent_host.sendCommand("movesouth 1")
+                        next.visit()
+                        graph.add_node(next)
+                        current = next
+                        self.solution_report.addAction()
+                        break
+                    except RuntimeError as e:
+                        print "Failed to send command:", e
+                        pass
 
             # Wait a sec
-            time.sleep(0.2)  # todo: change back to 0.5s
+            time.sleep(0.1)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -499,7 +525,7 @@ class AgentRealistic:
 
                 # Oracle
                 grid = oracle.get(u'grid', 0)
-                self.update_graph(maze_map, grid, current_node)
+                self.update_graph(maze_map, grid, current)
 
                 # GPS-like sensor
                 xpos = oracle.get(u'XPos', 0)  # Position in 2D plane, 1st axis
@@ -1139,9 +1165,9 @@ if __name__ == "__main__":
 
     for i_training_seed in range(2, args.missionseedmax):  # todo: change start of range back to 0
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
-        helper_solution_report = SolutionReport()
-        helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
-        helper_agent.run_agent()
+        # helper_solution_report = SolutionReport()
+        # helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
+        # helper_agent.run_agent()
 
         for i_rep in range(0,args.nrepeats):
             print('Setup the performance log...')
@@ -1151,7 +1177,8 @@ if __name__ == "__main__":
             print('Get an instance of the specific ' + args.agentname + ' agent with the agent_host')
             print('load the ' + args.missiontype + ' mission with seed ' + str(i_training_seed))
             agent_name = 'Agent' + args.agentname
-            state_space = deepcopy(helper_agent.state_space)
+            # state_space = deepcopy(helper_agent.state_space)
+            state_space = None
             agent_to_be_evaluated = eval(
                 agent_name + '(agent_host,args.malmoport,args.missiontype,i_training_seed,solution_report,state_space)')
 
