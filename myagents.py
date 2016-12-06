@@ -114,7 +114,7 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
         'helper': 120000,
         'small': 60000,  # todo: change back to 60s
         # 'small': 25000,
-        # 'small': 180000,
+        # 'small': 240000,
         'medium': 120000,
         'large': 240000,
     }
@@ -324,7 +324,9 @@ class AgentRealistic:
             self.type = type
             self.x = x
             self.z = z
-            self.path_cost = float("inf")
+            self.g = 0
+            self.h = 0
+            self.came_from = None
             if type == u'emerald_block':
                 self.color = "green"
             elif type == u'redstone_block':
@@ -336,6 +338,9 @@ class AgentRealistic:
             self.visits += 1
             if self.color == "yellow":
                 self.color = "white"
+
+        def __str__(self):
+            return "(%d, %d)" % (self.x, self.z)
 
     @staticmethod
     def update_graph(graph, grid, current_node):
@@ -402,55 +407,58 @@ class AgentRealistic:
             return "forward"
 
     @staticmethod
-    def distance(current_node, goal_node):
-        return math.sqrt(math.pow(current_node.x - goal_node.x, 2) + math.pow(current_node.z - goal_node.z, 2))
+    def distance(node1, node2):
+        return abs(node1.x - node2.x) + abs(node1.z - node2.z)
 
     @staticmethod
-    def best_first_graph_search(graph, current_node, goal_node, f):
-        """Search the nodes with the lowest f scores first.
-        You specify the function f(node) that you want to minimize; for example,
-        if f is a heuristic estimate to the goal, then we have greedy best
-        first search; if f is node.depth then we have breadth-first search.
-        There is a subtlety: the line "f = memoize(f, 'f')" means that the f
-        values will be cached on the nodes as they are computed. So after doing
-        a best first search you can examine the f values of the path returned."""
+    def astar_search(graph, current, goal):
+        """A* search is best-first graph search with f(n) = g(n)+h(n).
+        You need to specify the h function when you call astar_search, or
+        else in your Problem subclass."""
 
-        # reset all path costs
-        for node in graph.nodes():
-            node.path_cost = float("inf")
-
-        node = current_node
-        path = []
+        f = lambda node: node.g + node.h
 
         frontier = PriorityQueue(min, f)
-        frontier.append(node)
+        current.g = 0
+        current.h = 0
+        current.came_from = None
+        frontier.append(current)
 
         explored = set()
         while frontier:
             node = frontier.pop()
-            path.append(node)
+            print "popping", node, "from frontier"
 
-            if node.x == goal_node.x and node.z == goal_node.z:
-                return path
+            # found the goal, returning path of nodes
+            if node.x == goal.x and node.z == goal.z:
+                print "goal found"
+                path = []
+                cursor = node
+                while cursor:
+                    print cursor
+                    path.append(cursor)
+                    cursor = cursor.came_from
+                return path[:-1]
 
             explored.add(node)
-            for child in graph.get(node).keys():
-                if child not in explored and child not in frontier:
-                    frontier.append(child)
-                elif child in frontier:
-                    incumbent = frontier[child]
-                    if f(child) < f(incumbent):
-                        del frontier[incumbent]
-                        frontier.append(child)
-
-
-    @staticmethod
-    def astar_search(graph, current_node, goal_node):
-        """A* search is best-first graph search with f(n) = g(n)+h(n).
-        You need to specify the h function when you call astar_search, or
-        else in your Problem subclass."""
-        h = lambda n: AgentRealistic.distance(n, goal_node)
-        return AgentRealistic.best_first_graph_search(graph, current_node, goal_node, lambda n: n.path_cost + h(n))
+            for neighbour in graph.get(node).keys():
+                print node, "has neighbour", neighbour
+                if neighbour in explored:
+                    print "skipping", neighbour
+                    continue
+                if neighbour in frontier:
+                    new_g = node.g + 1
+                    if new_g < neighbour.g:
+                        print "updating", neighbour
+                        neighbour.g = new_g
+                        neighbour.came_from = node
+                else:
+                    print "adding", neighbour
+                    neighbour.g = node.g + 1
+                    neighbour.h = AgentRealistic.distance(neighbour, goal)
+                    neighbour.came_from = node
+                    print neighbour, "came from", neighbour.came_from
+                    frontier.append(neighbour)
 
     def run_agent(self):
         """ Run the Realistic agent and log the performance and resource use """
@@ -482,32 +490,58 @@ class AgentRealistic:
         current_node = self.Node(grid[4], 0, 0)
         maze_map = UndirectedGraph({current_node: {}})
         self.update_graph(maze_map, grid, current_node)
+        path = []
 
         # initialise visualisation
         graph = nx.Graph()
         graph.add_node(current_node)
 
         # Main loop:
+        # time.sleep(5)
         while state_t.is_mission_running:
             # choose action
             possible = maze_map.get(current_node).keys()
             unvisited = [node for node in possible if node.visits == 0]
             if possible:
-                if unvisited:
-                    # go forward if it's an option
-                    for unvisited_node in unvisited:
-                        if self.direction(current_node, unvisited_node) == "forward":
-                            next_node = unvisited_node
-                            break
-                    # choose random action if forward is not an option
-                    else:
-                        next_node = random.choice(unvisited)
+                if path:
+                    next_node = path.pop()
                 else:
-                    all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
-                    furthest_node = max(all_unvisited, key=lambda node: node.z)
-                    print self.astar_search(maze_map, current_node, furthest_node)
-                    break
+                    if unvisited:
+                        left_or_right = []
+                        best = ""
+                        for unvisited_node in unvisited:
+                            # definitely go to end node if adjacent to it
+                            if unvisited_node.type == u'redstone_block':
+                                next_node = unvisited_node
+                                break
+                            # direction priority: forward > left/right > back
+                            direction = self.direction(current_node, unvisited_node)
+                            if direction == "forward":
+                                next_node = unvisited_node
+                                best = "forward"
+                            elif direction == "left" or direction == "right":
+                                if best != "forward":
+                                    best = "left/right"
+                                    left_or_right.append(unvisited_node)
+                            else:
+                                if best not in ["forward", "left/right"]:
+                                    next_node = unvisited_node
+
+                        if best == "left/right":
+                            next_node = random.choice(left_or_right)
+                            print next_node
+
+                    else:
+                        all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
+                        forwardmost_node = max(all_unvisited, key=lambda node: node.z)
+                        print "forwardmost node:", forwardmost_node
+                        path = self.astar_search(maze_map, current_node, forwardmost_node)
+                        print "path:"
+                        for node in path:
+                            print node
+                        print
                 try:
+                    # print next_node
                     direction = self.direction(current_node, next_node)
                     if direction == "right":
                         agent_host.sendCommand("movewest 1")
@@ -526,7 +560,7 @@ class AgentRealistic:
                     pass
 
             # Wait a sec
-            time.sleep(0.2)  # todo: change back to 0.5s
+            time.sleep(0.5)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -1111,8 +1145,7 @@ if __name__ == "__main__":
     DEFAULT_MALMO_PATH = '/Users/Ken/Malmo'  # HINT: Change this to your own path, forward slash only!
     DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
     DEFAULT_MISSION_TYPE = 'small'  # HINT: Choose between {small,medium,large}
-    DEFAULT_START_SEED = 2
-    DEFAULT_MISSION_SEED_MAX = 3  # how many different instances of the given mission (i.e. maze layout)
+    DEFAULT_MISSION_SEED_MAX = 10  # how many different instances of the given mission (i.e. maze layout)
     DEFAULT_REPEATS = 1
     DEFAULT_PORT = 0
     DEFAULT_SAVE_PATH = './results/'
@@ -1189,7 +1222,7 @@ if __name__ == "__main__":
     print('Instantiate an agent interface/api to Malmo')
     agent_host = MalmoPython.AgentHost()
 
-    for i_training_seed in range(2, args.missionseedmax):  # todo: change start of range back to 0
+    for i_training_seed in range(0, args.missionseedmax):  # todo: change start of range back to 0
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
         # helper_solution_report = SolutionReport()
         # helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
