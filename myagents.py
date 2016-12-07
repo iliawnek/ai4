@@ -355,8 +355,6 @@ class AgentRealistic:
 
         for i in adjacent:
             type = grid[i]
-            if i == 7 and type == outer_wall:
-                print "found the wall!"
             if type in walkable:
                 if i == 1:
                     x = current_node.x
@@ -433,7 +431,6 @@ class AgentRealistic:
                 path = []
                 cursor = node
                 while cursor:
-                    print cursor
                     path.append(cursor)
                     cursor = cursor.came_from
                 return path[:-1]
@@ -482,10 +479,14 @@ class AgentRealistic:
         # restore remembered state space from previous attempt if available
         if AgentRealistic.remembered_state_space != None:
             maze_map = AgentRealistic.remembered_state_space
+            # get start node from remembered state space
             current_node = [node for node in maze_map.nodes() if node.x == 0 and node.z == 0][0]
-            all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
-            forwardmost_node = max(all_unvisited, key=lambda node: node.z)
-            path = self.astar_search(maze_map, current_node, forwardmost_node)
+            if AgentRealistic.goal != None:
+                destination_node = AgentRealistic.goal
+            else:
+                all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
+                destination_node = max(all_unvisited, key=lambda node: node.z)
+            path = self.astar_search(maze_map, current_node, destination_node)
         # initialise graph
         else:
             current_node = self.Node(grid[4], 0, 0)
@@ -514,6 +515,7 @@ class AgentRealistic:
                             # definitely go to end node if adjacent to it
                             if unvisited_node.type == u'redstone_block':
                                 next_node = unvisited_node
+                                AgentRealistic.goal = unvisited_node
                                 break
                             # direction priority: forward > left/right > back
                             direction = self.direction(current_node, unvisited_node)
@@ -581,7 +583,8 @@ class AgentRealistic:
 
                 # Oracle
                 grid = oracle.get(u'grid', 0)
-                self.update_graph(maze_map, grid, current_node)
+                if AgentRealistic.goal == None:
+                    self.update_graph(maze_map, grid, current_node)
                 AgentRealistic.remembered_state_space = maze_map
 
                 # GPS-like sensor
@@ -1141,7 +1144,7 @@ if __name__ == "__main__":
     DEFAULT_MALMO_PATH = '/Users/Ken/Malmo'  # HINT: Change this to your own path, forward slash only!
     DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
     DEFAULT_MISSION_TYPE = 'small'  # HINT: Choose between {small,medium,large}
-    DEFAULT_MISSION_SEED_MAX = 10  # how many different instances of the given mission (i.e. maze layout)
+    DEFAULT_MISSION_SEED_MAX = 8  # how many different instances of the given mission (i.e. maze layout)
     DEFAULT_REPEATS = 5
     DEFAULT_PORT = 0
     DEFAULT_SAVE_PATH = './results/'
@@ -1220,8 +1223,9 @@ if __name__ == "__main__":
 
     # state space is remembered over retries of the same map
     AgentRealistic.remembered_state_space = None
+    AgentRealistic.goal = None
 
-    for i_training_seed in range(0, args.missionseedmax):  # todo: change start of range back to 0
+    for i_training_seed in range(7, args.missionseedmax):  # todo: change start of range back to 0
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
         # helper_solution_report = SolutionReport()
         # helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
@@ -1271,6 +1275,8 @@ if __name__ == "__main__":
             time.sleep(1)
             print("------------------------------------------------------------------------------\n")
 
+        # reset remembered state space for next mission
         AgentRealistic.remembered_state_space = None
+        AgentRealistic.goal = None
 
     print("Done")
