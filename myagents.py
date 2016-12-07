@@ -112,8 +112,8 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
     }
     mtimeout = {
         'helper': 120000,
-        'small': 60000,  # todo: change back to 60s
-        # 'small': 25000,
+        # 'small': 60000,  # todo: change back to 60s
+        'small': 25000,
         # 'small': 240000,
         'medium': 120000,
         'large': 240000,
@@ -427,11 +427,9 @@ class AgentRealistic:
         explored = set()
         while frontier:
             node = frontier.pop()
-            print "popping", node, "from frontier"
 
             # found the goal, returning path of nodes
             if node.x == goal.x and node.z == goal.z:
-                print "goal found"
                 path = []
                 cursor = node
                 while cursor:
@@ -442,22 +440,17 @@ class AgentRealistic:
 
             explored.add(node)
             for neighbour in graph.get(node).keys():
-                print node, "has neighbour", neighbour
                 if neighbour in explored:
-                    print "skipping", neighbour
                     continue
                 if neighbour in frontier:
                     new_g = node.g + 1
                     if new_g < neighbour.g:
-                        print "updating", neighbour
                         neighbour.g = new_g
                         neighbour.came_from = node
                 else:
-                    print "adding", neighbour
                     neighbour.g = node.g + 1
                     neighbour.h = AgentRealistic.distance(neighbour, goal)
                     neighbour.came_from = node
-                    print neighbour, "came from", neighbour.came_from
                     frontier.append(neighbour)
 
     def run_agent(self):
@@ -486,11 +479,19 @@ class AgentRealistic:
         oracle = json.loads(msg)
         grid = oracle.get(u'grid', 0)
 
+        # restore remembered state space from previous attempt if available
+        if AgentRealistic.remembered_state_space != None:
+            maze_map = AgentRealistic.remembered_state_space
+            current_node = [node for node in maze_map.nodes() if node.x == 0 and node.z == 0][0]
+            all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
+            forwardmost_node = max(all_unvisited, key=lambda node: node.z)
+            path = self.astar_search(maze_map, current_node, forwardmost_node)
         # initialise graph
-        current_node = self.Node(grid[4], 0, 0)
-        maze_map = UndirectedGraph({current_node: {}})
-        self.update_graph(maze_map, grid, current_node)
-        path = []
+        else:
+            current_node = self.Node(grid[4], 0, 0)
+            maze_map = UndirectedGraph({current_node: {}})
+            self.update_graph(maze_map, grid, current_node)
+            path = []
 
         # initialise visualisation
         graph = nx.Graph()
@@ -529,17 +530,11 @@ class AgentRealistic:
 
                         if best == "left/right":
                             next_node = random.choice(left_or_right)
-                            print next_node
 
                     else:
                         all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
                         forwardmost_node = max(all_unvisited, key=lambda node: node.z)
-                        print "forwardmost node:", forwardmost_node
                         path = self.astar_search(maze_map, current_node, forwardmost_node)
-                        print "path:"
-                        for node in path:
-                            print node
-                        print
                 try:
                     # print next_node
                     direction = self.direction(current_node, next_node)
@@ -560,7 +555,7 @@ class AgentRealistic:
                     pass
 
             # Wait a sec
-            time.sleep(0.5)  # todo: change back to 0.5s
+            time.sleep(0.2)  # todo: change back to 0.5s
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -587,6 +582,7 @@ class AgentRealistic:
                 # Oracle
                 grid = oracle.get(u'grid', 0)
                 self.update_graph(maze_map, grid, current_node)
+                AgentRealistic.remembered_state_space = maze_map
 
                 # GPS-like sensor
                 xpos = oracle.get(u'XPos', 0)  # Position in 2D plane, 1st axis
@@ -595,23 +591,22 @@ class AgentRealistic:
             # Print some of the state information
             # print "Observations:", state_t.number_of_observations_since_last_state
             # print "Rewards received:", state_t.number_of_rewards_since_last_state
-            # print "(x, z):", xpos, zpos
+            # print "Current position (x, z):", xpos, zpos
             # print
 
-        # connect nodes in graph
+        # connect nodes in visualisation
         for node in maze_map.nodes():
             connections = maze_map.get(node)
             for connection in connections.keys():
                 graph.add_edge(node, connection)  # add edges to the graph
 
-        # generate graph visualisation
+        # draw visualisation
         positions = {node: (-node.x, node.z) for node in maze_map.nodes()}
         plt.figure(figsize=(18, 13))
         nx.draw(graph, pos=positions, node_color=[node.color for node in graph.nodes()])
         node_label_pos = {k: [v[0], v[1] + 0.04] for k, v in positions.items()}
         labels = {node: (node.visits if node.visits > 0 else "") for node in maze_map.nodes()}
         nx.draw_networkx_labels(graph, pos=node_label_pos, labels=labels, font_size=14)
-        # nx.draw_networkx_edge_labels(graph, pos=positions)
         plt.show()
 
         return
@@ -1137,6 +1132,7 @@ class AgentHelper:
 
 # --------------------------------------------------------------------------------------------
 #-- The main entry point if you run the module as a script--#
+
 if __name__ == "__main__":
 
     #-- Define default arguments, in case you run the module as a script --#
@@ -1146,7 +1142,7 @@ if __name__ == "__main__":
     DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
     DEFAULT_MISSION_TYPE = 'small'  # HINT: Choose between {small,medium,large}
     DEFAULT_MISSION_SEED_MAX = 10  # how many different instances of the given mission (i.e. maze layout)
-    DEFAULT_REPEATS = 1
+    DEFAULT_REPEATS = 5
     DEFAULT_PORT = 0
     DEFAULT_SAVE_PATH = './results/'
 
@@ -1222,13 +1218,16 @@ if __name__ == "__main__":
     print('Instantiate an agent interface/api to Malmo')
     agent_host = MalmoPython.AgentHost()
 
+    # state space is remembered over retries of the same map
+    AgentRealistic.remembered_state_space = None
+
     for i_training_seed in range(0, args.missionseedmax):  # todo: change start of range back to 0
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
         # helper_solution_report = SolutionReport()
         # helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
         # helper_agent.run_agent()
 
-        for i_rep in range(0,args.nrepeats):
+        for i_rep in range(0, args.nrepeats):
             print('Setup the performance log...')
             solution_report = SolutionReport()
             solution_report.setStudentGuid(args.studentguid)
@@ -1271,5 +1270,7 @@ if __name__ == "__main__":
             print('Sleep a sec to make sure the client is ready for next mission/agent variation...')
             time.sleep(1)
             print("------------------------------------------------------------------------------\n")
+
+        AgentRealistic.remembered_state_space = None
 
     print("Done")
