@@ -112,9 +112,7 @@ def GetMissionInstance( mission_type, mission_seed, agent_type):
     }
     mtimeout = {
         'helper': 120000,
-        # 'small': 60000,  # todo: change back to 60s
-        'small': 25000,
-        # 'small': 240000,
+        'small': 60000,
         'medium': 120000,
         'large': 240000,
     }
@@ -344,18 +342,19 @@ class AgentRealistic:
 
     @staticmethod
     def update_graph(graph, grid, current_node):
-        # definitions
+        # Minecraft block type definitions
         outer_wall = u'stone'
         inner_wall = u'stained_hardened_clay'
         path = u'glowstone'
         start = u'emerald_block'
         end = u'redstone_block'
-        walkable = [path, start, end]
-        adjacent = [1, 3, 5, 7]
+        walkable = [path, start, end]  # block types the agent can walk towards
+        adjacent = [1, 3, 5, 7]  # forward/back/left/right as defined by the grid
 
         for i in adjacent:
             type = grid[i]
             if type in walkable:
+                # determine coordinates of new node
                 if i == 1:
                     x = current_node.x
                     z = current_node.z - 1
@@ -369,12 +368,14 @@ class AgentRealistic:
                     x = current_node.x
                     z = current_node.z + 1
 
+                # create new node if none exists at that position, else get the existing one
                 existing_node = AgentRealistic.get_node(graph, type, x, z)
                 if existing_node:
                     connecting_node = existing_node
                 else:
                     connecting_node = AgentRealistic.Node(type, x, z)
 
+                # connect node to existing adjacent nodes
                 if AgentRealistic.get_node(graph, type, x - 1, z):
                     graph.connect(connecting_node, AgentRealistic.get_node(graph, type, x - 1, z))
                 if AgentRealistic.get_node(graph, type, x + 1, z):
@@ -404,16 +405,14 @@ class AgentRealistic:
         elif other_node.z == (current_node.z + 1):
             return "forward"
 
+    # Manhattan distance between two nodes
     @staticmethod
     def distance(node1, node2):
         return abs(node1.x - node2.x) + abs(node1.z - node2.z)
 
+    # A* search through maze using the Manhattan distance as the heuristic
     @staticmethod
     def astar_search(graph, current, goal):
-        """A* search is best-first graph search with f(n) = g(n)+h(n).
-        You need to specify the h function when you call astar_search, or
-        else in your Problem subclass."""
-
         f = lambda node: node.g + node.h
 
         frontier = PriorityQueue(min, f)
@@ -439,11 +438,13 @@ class AgentRealistic:
             for neighbour in graph.get(node).keys():
                 if neighbour in explored:
                     continue
+                # update g if new g is better
                 if neighbour in frontier:
                     new_g = node.g + 1
                     if new_g < neighbour.g:
                         neighbour.g = new_g
                         neighbour.came_from = node
+                # add neighbour to frontier
                 else:
                     neighbour.g = node.g + 1
                     neighbour.h = AgentRealistic.distance(neighbour, goal)
@@ -469,6 +470,7 @@ class AgentRealistic:
         self.solution_report.start()
 
         # INSERT: YOUR SOLUTION HERE (REWARDS MUST BE UPDATED IN THE solution_report)
+        visualise = True
 
         # read initial local environment
         state_t = self.agent_host.getWorldState()
@@ -481,13 +483,15 @@ class AgentRealistic:
             maze_map = AgentRealistic.remembered_state_space
             # get start node from remembered state space
             current_node = [node for node in maze_map.nodes() if node.x == 0 and node.z == 0][0]
+            # recover goal node from previous attempt if it has already been found
             if AgentRealistic.goal != None:
                 destination_node = AgentRealistic.goal
+            # else find path to forwardmost unvisited node on maze
             else:
                 all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
                 destination_node = max(all_unvisited, key=lambda node: node.z)
             path = self.astar_search(maze_map, current_node, destination_node)
-        # initialise graph
+        # initialise graph for first time
         else:
             current_node = self.Node(grid[4], 0, 0)
             maze_map = UndirectedGraph({current_node: {}})
@@ -495,19 +499,21 @@ class AgentRealistic:
             path = []
 
         # initialise visualisation
-        graph = nx.Graph()
-        graph.add_node(current_node)
+        if visualise:
+            graph = nx.Graph()
+            graph.add_node(current_node)
 
         # Main loop:
-        # time.sleep(5)
         while state_t.is_mission_running:
             # choose action
             possible = maze_map.get(current_node).keys()
             unvisited = [node for node in possible if node.visits == 0]
             if possible:
+                # get next node from A* search path if following it is still in progress
                 if path:
                     next_node = path.pop()
                 else:
+                    # check unvisited adjacent nodes
                     if unvisited:
                         left_or_right = []
                         best = ""
@@ -532,13 +538,13 @@ class AgentRealistic:
 
                         if best == "left/right":
                             next_node = random.choice(left_or_right)
-
+                    # perform A* search to forwardmost unvisited node and follow the path
                     else:
                         all_unvisited = [node for node in maze_map.nodes() if node.visits == 0]
                         forwardmost_node = max(all_unvisited, key=lambda node: node.z)
                         path = self.astar_search(maze_map, current_node, forwardmost_node)
+                # execute action to move to next_node and update as appropriate
                 try:
-                    # print next_node
                     direction = self.direction(current_node, next_node)
                     if direction == "right":
                         agent_host.sendCommand("movewest 1")
@@ -549,7 +555,8 @@ class AgentRealistic:
                     elif direction == "forward":
                         agent_host.sendCommand("movesouth 1")
                     next_node.visit()
-                    graph.add_node(next_node)
+                    if visualise:
+                        graph.add_node(next_node)
                     current_node = next_node
                     self.solution_report.addAction()
                 except RuntimeError as e:
@@ -557,7 +564,7 @@ class AgentRealistic:
                     pass
 
             # Wait a sec
-            time.sleep(0.2)  # todo: change back to 0.5s
+            time.sleep(0.5)
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -566,7 +573,7 @@ class AgentRealistic:
             # Note: Since we only observe the sensors and environment every
             #  a number of rewards may have accumulated in the buffer
             for reward_t in state_t.rewards:
-                # print "Rewards:", reward_t.getValue()
+                print "Rewards:", reward_t.getValue()
                 self.solution_report.addReward(reward_t.getValue(), datetime.datetime.now())
 
             # Check if anything went wrong along the way
@@ -581,7 +588,7 @@ class AgentRealistic:
                 msg = state_t.observations[-1].text  # Get the detailed for the last observed state
                 oracle = json.loads(msg)  # Parse the Oracle JSON
 
-                # Oracle
+                # update learned state space using local area sensor data
                 grid = oracle.get(u'grid', 0)
                 if AgentRealistic.goal == None:
                     self.update_graph(maze_map, grid, current_node)
@@ -592,32 +599,31 @@ class AgentRealistic:
                 zpos = oracle.get(u'ZPos', 0)  # Position in 2D plane, 2nd axis (yes Z!)
 
             # Print some of the state information
-            # print "Observations:", state_t.number_of_observations_since_last_state
-            # print "Rewards received:", state_t.number_of_rewards_since_last_state
-            # print "Current position (x, z):", xpos, zpos
-            # print
+            print "Observations:", state_t.number_of_observations_since_last_state
+            print "Rewards received:", state_t.number_of_rewards_since_last_state
+            print "Current position (x, z):", xpos, zpos
+            print
 
-        # connect nodes in visualisation
-        for node in maze_map.nodes():
-            connections = maze_map.get(node)
-            for connection in connections.keys():
-                graph.add_edge(node, connection)  # add edges to the graph
+        if visualise:
+            # connect nodes in visualisation
+            for node in maze_map.nodes():
+                connections = maze_map.get(node)
+                for connection in connections.keys():
+                    graph.add_edge(node, connection)  # add edges to the graph
 
-        # draw visualisation
-        positions = {node: (-node.x, node.z) for node in maze_map.nodes()}
-        plt.figure(figsize=(18, 13))
-        nx.draw(graph, pos=positions, node_color=[node.color for node in graph.nodes()])
-        node_label_pos = {k: [v[0], v[1] + 0.04] for k, v in positions.items()}
-        labels = {node: (node.visits if node.visits > 0 else "") for node in maze_map.nodes()}
-        nx.draw_networkx_labels(graph, pos=node_label_pos, labels=labels, font_size=14)
-        plt.show()
+            # draw visualisation
+            positions = {node: (-node.x, node.z) for node in maze_map.nodes()}
+            plt.figure(figsize=(18, 13))
+            nx.draw(graph, pos=positions, node_color=[node.color for node in graph.nodes()])
+            node_label_pos = {k: [v[0], v[1] + 0.04] for k, v in positions.items()}
+            labels = {node: (node.visits if node.visits > 0 else "") for node in maze_map.nodes()}
+            nx.draw_networkx_labels(graph, pos=node_label_pos, labels=labels, font_size=14)
+            plt.show()
 
         return
 
 #--------------------------------------------------------------------------------------
 #-- This class implements the Simple Agent --#
-# todo: modify simple agent to use discrete actions instead of absolute actions
-# todo: take intermediate rewards into account when choosing path
 class AgentSimple:
 
     def __init__(self, agent_host, agent_port, mission_type, mission_seed, solution_report, state_space):
@@ -717,6 +723,7 @@ class AgentSimple:
 
         # find solution path using A* search
         maze_map = UndirectedGraph(state_space.state_actions)
+        maze_map.locations = state_space.state_locations
         maze_problem = GraphProblem(state_space.start_id, state_space.goal_id, maze_map)
         iterations, node = AgentSimple.astar_search(maze_problem)
 
@@ -729,16 +736,13 @@ class AgentSimple:
 
         solution_path_local = deepcopy(solution_path)
 
-        # Main loop:
+        # Follow path returned by A* search
         state_t = self.agent_host.getWorldState()
-        once = True
         while state_t.is_mission_running:
 
-            # This is a teleportation agent
             if not solution_path_local: continue
             target_node = solution_path_local.pop()
             try:
-                print("Action_t: Goto state " + target_node.state)
                 if target_node.state == state_space.goal_id:
                     # Hack for AbsoluteMovements: Do not take the full step to 1,9 ;
                     # then you will "die" we just need to be close enough (0.25)
@@ -756,7 +760,7 @@ class AgentSimple:
                 pass
 
             # Wait a sec
-            time.sleep(0.5)  # todo: change back to 0.5s
+            time.sleep(0.5)
 
             # Get the world state
             state_t = agent_host.getWorldState()
@@ -803,12 +807,11 @@ class AgentSimple:
 
 #--------------------------------------------------------------------------------------
 #-- This class implements a basic, suboptimal Random Agent --#
-# todo: modify random agent to perform discrete actions instead of continuous actions
 class AgentRandom:
 
     def __init__(self, agent_host, agent_port, mission_type, mission_seed, solution_report, state_space_graph):
         """ Constructor for the Random agent """
-        self.AGENT_MOVEMENT_TYPE = 'Continuous'
+        self.AGENT_MOVEMENT_TYPE = 'Discrete'
         self.AGENT_NAME = 'Random'
 
         self.agent_host = agent_host
@@ -841,24 +844,14 @@ class AgentRandom:
         #-- Get the state of the world along with internal state...  --#
         state_t = self.agent_host.getWorldState()
 
-        #-- Set the randomness of the agent by seeding the random number generator --#
-        agent_confusement_level = 0.8
+        actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
 
         #-- Main loop: --#
         while state_t.is_mission_running:
 
-            #-- This is a random agent --#
+            # choose and execute random discrete action
             try:
-                # look straight ahead
-                self.agent_host.sendCommand("pitch " + str(0))
-                self.solution_report.addAction()
-
-                # move forward at full speed
-                self.agent_host.sendCommand("move " + str(1))
-                self.solution_report.addAction()
-
-                # start turning in a random direction, rather slowly
-                self.agent_host.sendCommand("turn " + str(agent_confusement_level * (random.random() * 2 - 1)))
+                agent_host.sendCommand(random.choice(actions))
                 self.solution_report.addAction()
             except RuntimeError as e:
                 print("Failed to send command:",e)
@@ -870,21 +863,9 @@ class AgentRandom:
             #-- Set the world state --#
             state_t = self.agent_host.getWorldState()
 
-            #-- Stop movement --#
-            if state_t.is_mission_running:
-                #-- Enforce a simple discrete behavior by stopping any continuous movement in progress --#
-                self.agent_host.sendCommand("move " + str(0))
-                self.solution_report.addAction()
-
-                self.agent_host.sendCommand("pitch " + str(0))
-                self.solution_report.addAction()
-
-                self.agent_host.sendCommand("turn " + str(0))
-                self.solution_report.addAction()
-
             #-- Collect the number of rewards and add to reward_cumulative  --#
             for reward_t in state_t.rewards:
-                print("Reward_t:",reward_t.getValue())
+                print("Reward:",reward_t.getValue())
                 self.solution_report.addReward(reward_t.getValue(), datetime.datetime.now())
 
             #-- Check if anything went wrong along the way  --#
@@ -919,24 +900,11 @@ class AgentRandom:
             #-- Vision sensor --#
             if state_t.number_of_video_frames_since_last_state > 0: # Has any Vision percepts been registred ?
                 frame = state_t.video_frames[0]
-                # Uncomment this code for gaining access to the vision of the agent
-                # img = Image.frombytes('RGB', (frame.width,frame.height), str(frame.pixels) )
-                # red, green, blue = img.split()
-                # img.show()
-                # red.show()
-                # green.show()
-                # blue.show()
-                # Oracle
-                # Depth: Your can get a pre-computed depth image the state_t.video_frames[0].pixels
-
-            #-- Print some of the state information --#
 
             # Print some of the state information
             print "Observations:", state_t.number_of_observations_since_last_state
             print "Rewards received:", state_t.number_of_rewards_since_last_state
             print "(x, z):", xpos, zpos
-            print "Yaw:", yaw
-            print "Pitch:", pitch
             print
 
         print("Mission has ended ... either because time has passed (negative reward) or goal reached (positive reward)")
@@ -964,7 +932,7 @@ class AgentHelper:
 
     def run_agent(self):
         """ Run the Helper agent to get the state-space """
-        do_plot = False
+        do_plot = True
 
         #-- Load and init the Helper mission --#
         print('Generate and load the ' + self.mission_type + ' mission with seed ' + str(self.mission_seed) + '.')
@@ -1144,7 +1112,7 @@ if __name__ == "__main__":
     DEFAULT_MALMO_PATH = '/Users/Ken/Malmo'  # HINT: Change this to your own path, forward slash only!
     DEFAULT_AIMA_PATH = '/Users/Ken/aima-python'  # HINT: Change this to your own path, forward slash only
     DEFAULT_MISSION_TYPE = 'small'  # HINT: Choose between {small,medium,large}
-    DEFAULT_MISSION_SEED_MAX = 8  # how many different instances of the given mission (i.e. maze layout)
+    DEFAULT_MISSION_SEED_MAX = 3  # how many different instances of the given mission (i.e. maze layout)
     DEFAULT_REPEATS = 5
     DEFAULT_PORT = 0
     DEFAULT_SAVE_PATH = './results/'
@@ -1225,7 +1193,7 @@ if __name__ == "__main__":
     AgentRealistic.remembered_state_space = None
     AgentRealistic.goal = None
 
-    for i_training_seed in range(7, args.missionseedmax):  # todo: change start of range back to 0
+    for i_training_seed in range(2, args.missionseedmax):
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
         # helper_solution_report = SolutionReport()
         # helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
