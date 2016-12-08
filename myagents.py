@@ -1195,9 +1195,9 @@ if __name__ == "__main__":
 
     for i_training_seed in range(2, args.missionseedmax):
         print('Get state-space representation using a AgentHelper regardless of the AgentType...')
-        # helper_solution_report = SolutionReport()
-        # helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
-        # helper_agent.run_agent()
+        helper_solution_report = SolutionReport()
+        helper_agent = AgentHelper(agent_host, args.malmoport, args.missiontype, i_training_seed, helper_solution_report, None)
+        helper_agent.run_agent()
 
         for i_rep in range(0, args.nrepeats):
             print('Setup the performance log...')
@@ -1207,8 +1207,7 @@ if __name__ == "__main__":
             print('Get an instance of the specific ' + args.agentname + ' agent with the agent_host')
             print('load the ' + args.missiontype + ' mission with seed ' + str(i_training_seed))
             agent_name = 'Agent' + args.agentname
-            # state_space = deepcopy(helper_agent.state_space)
-            state_space = None
+            state_space = deepcopy(helper_agent.state_space)
             agent_to_be_evaluated = eval(
                 agent_name + '(agent_host,args.malmoport,args.missiontype,i_training_seed,solution_report,state_space)')
 
